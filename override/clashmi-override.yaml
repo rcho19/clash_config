@@ -1,0 +1,388 @@
+# Clash Mi / mihomo YAML 覆写片段
+#
+# 这是“自定义覆写配置”，不是包含节点凭据的独立订阅文件。
+# 使用方式：在 Clash Mi 的当前远程订阅中加载此 YAML 覆写；它不负责提供节点。
+#
+# Clash Mi 中需将 TUN 设置为“覆写”并启用；此处提供核心 TUN 参数。
+
+mode: rule
+allow-lan: false
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: strict
+global-client-fingerprint: chrome
+
+geodata-mode: true
+geo-auto-update: true
+geo-update-interval: 24
+geox-url:
+  geoip: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
+  geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
+
+profile:
+  store-selected: true
+  store-fake-ip: false
+
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: true
+  sniff:
+    HTTP:
+      ports:
+        - 80
+        - 8080-8880
+      override-destination: true
+    TLS:
+      ports:
+        - 443
+        - 8443
+    QUIC:
+      ports:
+        - 443
+        - 8443
+
+tun:
+  enable: true
+  stack: system
+  auto-route: true
+  auto-detect-interface: true
+  strict-route: true
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+  route-exclude-address:
+    - 0.0.0.0/8
+    - 10.0.0.0/8
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 224.0.0.0/4
+    - 255.255.255.255/32
+
+# 使用 include-all-proxies / include-all-providers，避免覆写文件硬编码订阅节点名。
+proxy-groups:
+  - name: GLOBAL
+    type: select
+    include-all-proxies: true
+    include-all-providers: true
+
+  - name: PROXY
+    type: select
+    include-all-proxies: true
+    include-all-providers: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+
+  - name: AI
+    type: select
+    proxies:
+      - PROXY
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+
+  - name: MEDIA
+    type: select
+    proxies:
+      - PROXY
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+
+dns:
+  enable: true
+  ipv6: false
+  cache-algorithm: arc
+  prefer-h3: false
+  use-hosts: true
+  use-system-hosts: false
+  respect-rules: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    - "+.cn"
+    - "*.lan"
+    - "*.local"
+    - localhost.ptlogin2.qq.com
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+    - "time.*.com"
+    - "time.*.gov"
+    - "time.*.edu.cn"
+    - "time.*.apple.com"
+    - time-ios.apple.com
+    - "+.pool.ntp.org"
+    - geosite:private
+    - geosite:cn
+    - geosite:google-cn
+    - geosite:synology
+    - geosite:googlefcm
+    - geosite:epicgames
+    - geosite:nvidia@cn
+    - geosite:microsoft@cn
+    - geosite:cloudflare@cn
+    - geosite:steam@cn
+    - geosite:category-game-platforms-download@cn
+    - geosite:category-ntp
+    - geosite:connectivity-check
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - "https://1.1.1.1/dns-query#GLOBAL"
+    - "https://8.8.8.8/dns-query#GLOBAL"
+  nameserver-policy:
+    "+.cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:private":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:google-cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:synology":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:googlefcm":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:epicgames":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:nvidia@cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:microsoft@cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:cloudflare@cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:steam@cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:category-game-platforms-download@cn":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:category-ntp":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "geosite:connectivity-check":
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+    "+.browserleaks.com": &foreign_dns
+      - "https://1.1.1.1/dns-query#GLOBAL"
+      - "https://8.8.8.8/dns-query#GLOBAL"
+    "+.ipleak.net": *foreign_dns
+    "+.ipinfo.io": *foreign_dns
+    "+.ifconfig.me": *foreign_dns
+    "+.ifconfig.co": *foreign_dns
+    "+.ip.sb": *foreign_dns
+    "+.ip-api.com": *foreign_dns
+    "+.myip.com": *foreign_dns
+    "+.whoer.net": *foreign_dns
+    "+.whatismyipaddress.com": *foreign_dns
+    "+.cloudflare.com": *foreign_dns
+    "+.google.com": *foreign_dns
+    "+.googleapis.com": *foreign_dns
+    "+.gstatic.com": *foreign_dns
+    "+.ggpht.com": *foreign_dns
+    "+.googleusercontent.com": *foreign_dns
+    "+.googlevideo.com": *foreign_dns
+    "+.youtube.com": *foreign_dns
+    "+.youtu.be": *foreign_dns
+    "+.ytimg.com": *foreign_dns
+    "+.x.com": *foreign_dns
+    "+.twitter.com": *foreign_dns
+    "+.twimg.com": *foreign_dns
+    "+.t.co": *foreign_dns
+    "+.instagram.com": *foreign_dns
+    "+.cdninstagram.com": *foreign_dns
+    "+.threads.net": *foreign_dns
+    "+.facebook.com": *foreign_dns
+    "+.facebook.net": *foreign_dns
+    "+.fb.com": *foreign_dns
+    "+.fbcdn.net": *foreign_dns
+    "+.fbsbx.com": *foreign_dns
+    "+.messenger.com": *foreign_dns
+    "+.whatsapp.com": *foreign_dns
+    "+.whatsapp.net": *foreign_dns
+    "+.openai.com": *foreign_dns
+    "+.chatgpt.com": *foreign_dns
+    "+.oaistatic.com": *foreign_dns
+    "+.oaiusercontent.com": *foreign_dns
+    "+.auth0.com": *foreign_dns
+    "+.intercom.io": *foreign_dns
+    "+.intercomcdn.com": *foreign_dns
+    "+.anthropic.com": *foreign_dns
+    "+.claude.ai": *foreign_dns
+    "+.claudeusercontent.com": *foreign_dns
+    "+.gemini.google.com": *foreign_dns
+    "+.generativelanguage.googleapis.com": *foreign_dns
+    "+.aistudio.google.com": *foreign_dns
+    "+.ai.google.dev": *foreign_dns
+    "+.makersuite.google.com": *foreign_dns
+    "+.perplexity.ai": *foreign_dns
+    "+.x.ai": *foreign_dns
+    "+.grok.com": *foreign_dns
+    "+.huggingface.co": *foreign_dns
+    "+.hf.co": *foreign_dns
+    "+.hf.space": *foreign_dns
+    "+.replicate.com": *foreign_dns
+    "+.cohere.com": *foreign_dns
+    "+.mistral.ai": *foreign_dns
+    "+.openrouter.ai": *foreign_dns
+    "+.copilot.microsoft.com": *foreign_dns
+    "+.bing.com": *foreign_dns
+    "+.bingapis.com": *foreign_dns
+    "+.netflix.com": *foreign_dns
+    "+.nflxvideo.net": *foreign_dns
+    "+.disneyplus.com": *foreign_dns
+    "+.spotify.com": *foreign_dns
+    "geosite:category-ai-!cn": *foreign_dns
+    "geosite:telegram": *foreign_dns
+    "geosite:google": *foreign_dns
+    "geosite:gfw": *foreign_dns
+  proxy-server-nameserver:
+    - "https://doh.pub/dns-query#DIRECT"
+    - "https://dns.alidns.com/dns-query#DIRECT"
+  direct-nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  direct-nameserver-follow-policy: true
+
+hosts:
+  dns.alidns.com:
+    - 223.5.5.5
+    - 223.6.6.6
+  doh.pub:
+    - 1.12.12.12
+    - 120.53.53.53
+  services.googleapis.cn:
+    - services.googleapis.com
+
+rules:
+  - GEOSITE,category-ads-all,REJECT
+  - GEOSITE,private,DIRECT
+  - GEOIP,private,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,local,DIRECT
+  - DOMAIN-SUFFIX,lan,DIRECT
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+
+  # 严格拦截常见 STUN/TURN，降低 WebRTC 通过直连 UDP 暴露真实地址的风险。
+  - DOMAIN-KEYWORD,stun,REJECT
+  - DOMAIN-KEYWORD,turn,REJECT
+  - AND,((NETWORK,UDP),(DST-PORT,3478)),REJECT
+  - AND,((NETWORK,UDP),(DST-PORT,5349)),REJECT
+  - AND,((NETWORK,UDP),(DST-PORT,19302)),REJECT
+  # 默认保留 UDP 443/QUIC；如 TCP 型节点导致 HTTP/3 反复失败，可启用下一行。
+  # - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
+
+  - GEOSITE,google-cn,DIRECT
+  - GEOSITE,synology,DIRECT
+  - DOMAIN-SUFFIX,sharepoint.com,DIRECT
+  - GEOSITE,microsoft@cn,DIRECT
+  - GEOSITE,category-game-platforms-download@cn,DIRECT
+
+  # 具体 AI/媒体规则放在通用 Google/YouTube 规则之前。
+  - GEOSITE,category-ai-!cn,AI
+  - DOMAIN-SUFFIX,openai.com,AI
+  - DOMAIN-SUFFIX,chatgpt.com,AI
+  - DOMAIN-SUFFIX,oaistatic.com,AI
+  - DOMAIN-SUFFIX,oaiusercontent.com,AI
+  - DOMAIN-SUFFIX,auth0.com,AI
+  - DOMAIN-SUFFIX,intercom.io,AI
+  - DOMAIN-SUFFIX,intercomcdn.com,AI
+  - DOMAIN-SUFFIX,anthropic.com,AI
+  - DOMAIN-SUFFIX,claude.ai,AI
+  - DOMAIN-SUFFIX,claudeusercontent.com,AI
+  - DOMAIN-SUFFIX,gemini.google.com,AI
+  - DOMAIN-SUFFIX,generativelanguage.googleapis.com,AI
+  - DOMAIN-SUFFIX,aistudio.google.com,AI
+  - DOMAIN-SUFFIX,ai.google.dev,AI
+  - DOMAIN-SUFFIX,makersuite.google.com,AI
+  - DOMAIN-SUFFIX,perplexity.ai,AI
+  - DOMAIN-SUFFIX,x.ai,AI
+  - DOMAIN-SUFFIX,grok.com,AI
+  - DOMAIN-SUFFIX,huggingface.co,AI
+  - DOMAIN-SUFFIX,hf.co,AI
+  - DOMAIN-SUFFIX,hf.space,AI
+  - DOMAIN-SUFFIX,replicate.com,AI
+  - DOMAIN-SUFFIX,cohere.com,AI
+  - DOMAIN-SUFFIX,mistral.ai,AI
+  - DOMAIN-SUFFIX,openrouter.ai,AI
+  - DOMAIN-SUFFIX,copilot.microsoft.com,AI
+
+  - DOMAIN-SUFFIX,googlevideo.com,MEDIA
+  - DOMAIN-SUFFIX,youtube.com,MEDIA
+  - DOMAIN-SUFFIX,youtu.be,MEDIA
+  - DOMAIN-SUFFIX,ytimg.com,MEDIA
+  - DOMAIN-SUFFIX,netflix.com,MEDIA
+  - DOMAIN-SUFFIX,nflxvideo.net,MEDIA
+  - DOMAIN-SUFFIX,disneyplus.com,MEDIA
+  - DOMAIN-SUFFIX,spotify.com,MEDIA
+
+  - DOMAIN-SUFFIX,browserleaks.com,PROXY
+  - DOMAIN-SUFFIX,ipleak.net,PROXY
+  - DOMAIN-SUFFIX,ipinfo.io,PROXY
+  - DOMAIN-SUFFIX,ifconfig.me,PROXY
+  - DOMAIN-SUFFIX,ifconfig.co,PROXY
+  - DOMAIN-SUFFIX,ip.sb,PROXY
+  - DOMAIN-SUFFIX,ip-api.com,PROXY
+  - DOMAIN-SUFFIX,myip.com,PROXY
+  - DOMAIN-SUFFIX,whoer.net,PROXY
+  - DOMAIN-SUFFIX,whatismyipaddress.com,PROXY
+  - DOMAIN-SUFFIX,cloudflare.com,PROXY
+  - DOMAIN-SUFFIX,google.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - DOMAIN-SUFFIX,gstatic.com,PROXY
+  - DOMAIN-SUFFIX,ggpht.com,PROXY
+  - DOMAIN-SUFFIX,googleusercontent.com,PROXY
+  - DOMAIN-SUFFIX,bing.com,PROXY
+  - DOMAIN-SUFFIX,bingapis.com,PROXY
+  - DOMAIN-SUFFIX,googlevideo.com,PROXY
+  - DOMAIN-SUFFIX,youtube.com,PROXY
+  - DOMAIN-SUFFIX,youtu.be,PROXY
+  - DOMAIN-SUFFIX,ytimg.com,PROXY
+
+  - GEOSITE,telegram,PROXY
+  - GEOSITE,google,PROXY
+  - GEOSITE,gfw,PROXY
+  - DOMAIN-SUFFIX,x.com,PROXY
+  - DOMAIN-SUFFIX,twitter.com,PROXY
+  - DOMAIN-SUFFIX,twimg.com,PROXY
+  - DOMAIN-SUFFIX,t.co,PROXY
+  - DOMAIN-SUFFIX,instagram.com,PROXY
+  - DOMAIN-SUFFIX,cdninstagram.com,PROXY
+  - DOMAIN-SUFFIX,threads.net,PROXY
+  - DOMAIN-SUFFIX,facebook.com,PROXY
+  - DOMAIN-SUFFIX,facebook.net,PROXY
+  - DOMAIN-SUFFIX,fb.com,PROXY
+  - DOMAIN-SUFFIX,fbcdn.net,PROXY
+  - DOMAIN-SUFFIX,fbsbx.com,PROXY
+  - DOMAIN-SUFFIX,messenger.com,PROXY
+  - DOMAIN-SUFFIX,whatsapp.com,PROXY
+  - DOMAIN-SUFFIX,whatsapp.net,PROXY
+  - DOMAIN-SUFFIX,github.com,PROXY
+  - DOMAIN-SUFFIX,githubusercontent.com,PROXY
+  - DOMAIN-SUFFIX,githubassets.com,PROXY
+  - DOMAIN-SUFFIX,gitlab.com,PROXY
+  - DOMAIN-SUFFIX,reddit.com,PROXY
+  - DOMAIN-SUFFIX,discord.com,PROXY
+  - DOMAIN-SUFFIX,discordapp.com,PROXY
+  - DOMAIN-SUFFIX,t.me,PROXY
+
+  - GEOSITE,cn,DIRECT
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,PROXY
