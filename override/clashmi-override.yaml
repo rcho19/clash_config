@@ -214,17 +214,9 @@ rules:
   - DOMAIN-SUFFIX,whoer.net,PROXY
   - DOMAIN-SUFFIX,whatismyipaddress.com,PROXY
   - DOMAIN-SUFFIX,cloudflare.com,PROXY
-  - DOMAIN-SUFFIX,google.com,PROXY
-  - DOMAIN-SUFFIX,googleapis.com,PROXY
-  - DOMAIN-SUFFIX,gstatic.com,PROXY
   - DOMAIN-SUFFIX,ggpht.com,PROXY
-  - DOMAIN-SUFFIX,googleusercontent.com,PROXY
   - DOMAIN-SUFFIX,bing.com,PROXY
   - DOMAIN-SUFFIX,bingapis.com,PROXY
-  - DOMAIN-SUFFIX,googlevideo.com,PROXY
-  - DOMAIN-SUFFIX,youtube.com,PROXY
-  - DOMAIN-SUFFIX,youtu.be,PROXY
-  - DOMAIN-SUFFIX,ytimg.com,PROXY
 
   - GEOSITE,telegram,PROXY
   - GEOSITE,google,PROXY
