@@ -2,8 +2,8 @@
 #
 # 职责边界：
 # - Clash Mi 内置覆写负责 TUN（启用、协议栈、DNS 劫持、严格路由等平台参数）。
-# - 本文件只负责 DNS、嗅探、代理组与分流，不包含节点凭据，也不声明 tun。
-# - 订阅中只保留一条自建 LAX 节点时，PROXY 会自动收录并统一承载代理流量。
+# - 本文件只负责 DNS、嗅探与分流，不包含节点凭据，也不声明 tun。
+# - 保留订阅原生 PROXY 组和 Mihomo 自动生成的 GLOBAL 组，避免覆盖已选中的 LAX。
 
 mode: rule
 allow-lan: false
@@ -43,21 +43,6 @@ sniffer:
       ports:
         - 443
         - 8443
-
-# 不硬编码节点名，避免订阅重命名节点后失效。
-proxy-groups:
-  - name: PROXY
-    type: select
-    include-all: true
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    lazy: true
-
-  # 全局模式与规则模式共用同一出口，避免 DNS 经 GLOBAL、流量经 PROXY 的分裂。
-  - name: GLOBAL
-    type: select
-    proxies:
-      - PROXY
 
 dns:
   enable: true
