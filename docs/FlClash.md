@@ -5,7 +5,7 @@
 在订阅的覆写设置中选择“脚本”，使用以下地址：
 
 ```text
-https://testingcf.jsdelivr.net/gh/rcho19/clash_config@main/override/flclash-override.js
+https://cdn.jsdelivr.net/gh/rcho19/clash_config@main/override/flclash-override.js
 ```
 
 保存后重新应用订阅或重启内核。脚本会复用订阅原生 `PROXY`；缺少时才补建。`GLOBAL` 会固定跟随实际代理出口，旧版或订阅遗留的 `AI`、`MEDIA` 策略组会被删除，其域名仍统一走 `PROXY`。
