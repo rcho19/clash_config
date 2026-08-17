@@ -8,7 +8,7 @@
 https://testingcf.jsdelivr.net/gh/rcho19/clash_config@main/override/flclash-override.js
 ```
 
-保存后重新应用订阅或重启内核。脚本会保留订阅原生 `PROXY`、显式 `GLOBAL` 和其他策略组；只有订阅没有 `PROXY` 时才补建一个。
+保存后重新应用订阅或重启内核。脚本会复用订阅原生 `PROXY`；缺少时才补建。`GLOBAL` 会固定跟随实际代理出口，旧版或订阅遗留的 `AI`、`MEDIA` 策略组会被删除，其域名仍统一走 `PROXY`。
 
 ### 客户端设置
 
@@ -34,8 +34,10 @@ geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 
 ### 出口选择
 
-- 已有 `PROXY` 时，脚本不会改写它，也不会重置用户选择；请在 FlClash 中确认 `PROXY` 当前选中 LAX 节点。
-- 没有 `PROXY`、但订阅直接提供节点时，脚本会创建 `PROXY`，并优先排列 `la9929-vless-reality`、美国或 Reality/VLESS 节点。
+- 脚本不写死节点名称，也不根据地区、协议或名称关键词猜测优先节点；多节点始终保留订阅原始顺序。
+- 只有一个静态候选的 `select` 会改为单候选 `fallback`，让 FlClash 和 Mihomo 直接使用唯一节点，不受旧 `selectedMap` 中失效记录影响。
+- `GLOBAL` 固定使用 `PROXY`（名称冲突时使用自动生成的安全组名）；全局模式与规则模式共用同一实际出口。
+- `AI`、`MEDIA` 不再作为策略组保留；AI、Google、YouTube、Netflix、Spotify 等域名覆盖仍直接指向统一代理出口。
 - 只有 `proxy-providers` 时，新建的 `PROXY` 会通过 `use` 引用所有 provider。
 - 若节点或 provider 已占用 `PROXY` 这个名称，脚本会使用 `FLCLASH-PROXY`，避免名称冲突。
 - 对未显式设置指纹的 VMess/VLESS TLS、Trojan 和 AnyTLS 内联节点，脚本会补充节点级 `client-fingerprint: chrome`；订阅已有值保持不变。
@@ -47,7 +49,7 @@ geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geos
 1. 境外 DNS 地址带有 `#PROXY`（或自动生成的安全组名），没有 `system://`。
 2. `direct-nameserver-follow-policy` 为 `false`。
 3. TUN 中 `strict-route` 和 `auto-detect-interface` 为 `true`。
-4. `GLOBAL` 没有被脚本重建，`PROXY` 仍保持预期节点选择。
+4. 单节点时，`PROXY` 显示唯一节点，`GLOBAL` 显示 `PROXY`；策略组列表中没有 `AI`、`MEDIA`。
 5. 规则最后一条是 `MATCH,PROXY`（名称冲突时为自动生成的组名）。
 
 脚本默认阻断常见 STUN/TURN UDP 端口，但不阻断 UDP 443/QUIC。若节点不支持 UDP、出现 HTTP/3 反复失败，可将脚本顶部 `STRICT_BLOCK_QUIC` 改为 `true` 后再测试。

@@ -31,7 +31,16 @@ const createRunner = ({ directDomains = [], proxyDomains = [] } = {}) => {
 
 const applyOverride = createRunner();
 
-test("单节点配置补建 PROXY，且不自定义 GLOBAL/AI/MEDIA", () => {
+const assertSingleTargetGroup = (group, name, proxyName) => {
+  assert.equal(group.name, name);
+  assert.equal(group.type, "fallback");
+  assert.deepEqual(group.proxies, [proxyName]);
+  assert.equal(group.url, "https://www.gstatic.com/generate_204");
+  assert.equal(group.interval, 300);
+  assert.equal(group.lazy, true);
+};
+
+test("多节点按订阅原始顺序构造 PROXY，不再按名称猜测优先级", () => {
   const result = applyOverride({
     proxies: [
       { name: "backup", type: "ss" },
@@ -40,13 +49,12 @@ test("单节点配置补建 PROXY，且不自定义 GLOBAL/AI/MEDIA", () => {
     tun: { enable: false, stack: "gvisor" }
   });
 
-  assert.deepEqual(result["proxy-groups"], [
-    {
-      name: "PROXY",
-      type: "select",
-      proxies: ["la9929-vless-reality", "backup"]
-    }
-  ]);
+  assert.deepEqual(result["proxy-groups"][0], {
+    name: "PROXY",
+    type: "select",
+    proxies: ["backup", "la9929-vless-reality"]
+  });
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
   assert.equal(result.proxies[0]["client-fingerprint"], undefined);
   assert.equal(result.proxies[1]["client-fingerprint"], "chrome");
   assert.equal(result.tun.enable, false);
@@ -62,7 +70,7 @@ test("单节点配置补建 PROXY，且不自定义 GLOBAL/AI/MEDIA", () => {
   assert.equal(result.rules.at(-1), "MATCH,PROXY");
 });
 
-test("已有 PROXY 与显式 GLOBAL 完整保留", () => {
+test("单节点 PROXY 与 GLOBAL 使用唯一候选，并保留展示元数据", () => {
   const groups = [
     { name: "PROXY", type: "select", proxies: ["LAX"], icon: "proxy.png" },
     { name: "GLOBAL", type: "select", proxies: ["PROXY", "DIRECT"], icon: "global.png" },
@@ -73,7 +81,33 @@ test("已有 PROXY 与显式 GLOBAL 完整保留", () => {
     "proxy-groups": groups
   });
 
-  assert.deepEqual(result["proxy-groups"], groups);
+  assert.equal(result["proxy-groups"].length, 3);
+  assertSingleTargetGroup(result["proxy-groups"][0], "PROXY", "LAX");
+  assert.equal(result["proxy-groups"][0].icon, "proxy.png");
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
+  assert.equal(result["proxy-groups"][1].icon, "global.png");
+  assert.deepEqual(result["proxy-groups"][2], groups[2]);
+});
+
+test("删除 AI/MEDIA 策略组并递归清理失效引用", () => {
+  const result = applyOverride({
+    proxies: [{ name: "LAX", type: "vless" }],
+    "proxy-groups": [
+      { name: "PROXY", type: "select", proxies: ["LAX"] },
+      { name: "AI", type: "select", proxies: ["PROXY"] },
+      { name: "Media", type: "select", proxies: ["PROXY"] },
+      { name: "custom", type: "select", proxies: ["AI", "Media", "LAX"] },
+      { name: "stale", type: "select", proxies: ["Media"] }
+    ]
+  });
+
+  assert.deepEqual(
+    result["proxy-groups"].map((group) => group.name),
+    ["PROXY", "GLOBAL", "custom"]
+  );
+  assertSingleTargetGroup(result["proxy-groups"][0], "PROXY", "LAX");
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
+  assertSingleTargetGroup(result["proxy-groups"][2], "custom", "LAX");
 });
 
 test("provider-only 配置通过 use 构造 PROXY", () => {
@@ -89,6 +123,7 @@ test("provider-only 配置通过 use 构造 PROXY", () => {
     type: "select",
     use: ["primary", "backup"]
   });
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
   assert.equal(result.rules.at(-1), "MATCH,PROXY");
 });
 
@@ -97,14 +132,12 @@ test("只有其他策略组时以安全的 PROXY 包装复用", () => {
     "proxy-groups": [{ name: "main", type: "select", proxies: ["node-from-provider"] }]
   });
 
-  assert.deepEqual(result["proxy-groups"][0], {
-    name: "PROXY",
-    type: "select",
-    proxies: ["main"]
-  });
+  assertSingleTargetGroup(result["proxy-groups"][0], "PROXY", "main");
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
+  assertSingleTargetGroup(result["proxy-groups"][2], "main", "node-from-provider");
 });
 
-test("显式 GLOBAL 预留 PROXY 引用时补建同名组", () => {
+test("显式 GLOBAL 预留 PROXY 引用时补建同名组并固定跟随出口", () => {
   const globalGroup = { name: "GLOBAL", type: "select", proxies: ["PROXY", "DIRECT"] };
   const result = applyOverride({
     proxies: [{ name: "LAX", type: "vless" }],
@@ -112,7 +145,8 @@ test("显式 GLOBAL 预留 PROXY 引用时补建同名组", () => {
   });
 
   assert.equal(result["proxy-groups"][0].name, "PROXY");
-  assert.deepEqual(result["proxy-groups"][1], globalGroup);
+  assertSingleTargetGroup(result["proxy-groups"][0], "PROXY", "LAX");
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "PROXY");
   assert.equal(result.rules.at(-1), "MATCH,PROXY");
 });
 
@@ -122,7 +156,9 @@ test("PROXY 名称冲突时生成独立组名并同步 DNS 与规则", () => {
   });
 
   assert.equal(result["proxy-groups"][0].name, "FLCLASH-PROXY");
+  assert.equal(result["proxy-groups"][0].type, "fallback");
   assert.deepEqual(result["proxy-groups"][0].proxies, ["PROXY"]);
+  assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "FLCLASH-PROXY");
   assert.equal(result.dns.nameserver[0], "https://1.1.1.1/dns-query#FLCLASH-PROXY");
   assert.equal(result.rules.at(-1), "MATCH,FLCLASH-PROXY");
 });

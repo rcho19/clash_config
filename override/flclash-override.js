@@ -8,10 +8,14 @@ const USER_DIRECT_DOMAINS = [];
 const USER_PROXY_DOMAINS = [];
 
 const SETTINGS = {
-  PREFERRED_PROXY: "la9929-vless-reality",
+  SINGLE_TARGET_TEST_URL: "https://www.gstatic.com/generate_204",
+  SINGLE_TARGET_INTERVAL: 300,
   STRICT_BLOCK_QUIC: false,
   STRICT_BLOCK_STUN: true
 };
+
+// AI 与 MEDIA 只作为路由分类存在，不再保留同名策略组。
+const REDUNDANT_GROUP_NAMES = new Set(["AI", "MEDIA"]);
 
 const LEAK_CHECK_DOMAINS = [
   "browserleaks.com",
@@ -148,11 +152,107 @@ const getProxyGroups = (config) =>
     (group) => isPlainObject(group) && group.name
   );
 
-const pickPreferredProxy = (proxyNames = []) =>
-  proxyNames.find((name) => name === SETTINGS.PREFERRED_PROXY) ||
-  proxyNames.find((name) => /la9929|reality|vless|(?:^|[^a-z])us(?:a)?(?:[^a-z]|$)|美国|美西/i.test(name)) ||
-  proxyNames[0] ||
-  null;
+const getGroupProxyNames = (group) =>
+  unique(
+    (Array.isArray(group && group.proxies) ? group.proxies : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean)
+  );
+
+const getGroupProviderNames = (group) =>
+  unique(
+    (Array.isArray(group && group.use) ? group.use : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean)
+  );
+
+const hasDynamicGroupSource = (group) =>
+  getGroupProviderNames(group).length > 0 ||
+  group["include-all"] === true ||
+  group["include-all-proxies"] === true ||
+  group["include-all-providers"] === true;
+
+const hasUsableGroupSource = (group) =>
+  getGroupProxyNames(group).length > 0 || hasDynamicGroupSource(group);
+
+const isRedundantGroupName = (name) =>
+  REDUNDANT_GROUP_NAMES.has(String(name || "").trim().toUpperCase());
+
+// 删除旧版脚本或订阅遗留的 AI/MEDIA 组，并递归清理仅引用这些组的空壳组。
+const removeRedundantGroups = (config) => {
+  const hadProxyGroups = Array.isArray(config["proxy-groups"]);
+  let groups = getProxyGroups(config);
+  const removedNames = new Set(
+    groups.filter((group) => isRedundantGroupName(group.name)).map((group) => group.name)
+  );
+
+  groups = groups.filter((group) => !removedNames.has(group.name));
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const nextGroups = [];
+
+    groups.forEach((group) => {
+      const originalProxyNames = getGroupProxyNames(group);
+      const proxyNames = originalProxyNames.filter((name) => !removedNames.has(name));
+      const cleanedGroup = Array.isArray(group.proxies)
+        ? { ...group, proxies: proxyNames }
+        : group;
+
+      if (
+        originalProxyNames.length > 0 &&
+        proxyNames.length === 0 &&
+        !hasDynamicGroupSource(cleanedGroup)
+      ) {
+        removedNames.add(group.name);
+        changed = true;
+        return;
+      }
+
+      if (proxyNames.length !== originalProxyNames.length) changed = true;
+      nextGroups.push(cleanedGroup);
+    });
+
+    groups = nextGroups;
+  }
+
+  if (hadProxyGroups || removedNames.size > 0) {
+    config["proxy-groups"] = groups;
+  }
+};
+
+// FlClash 会回放旧 selectedMap。单候选 select 改为自动计算型 fallback 后，
+// 不再受失效旧选择影响，界面与内核都会直接使用唯一候选。
+const normalizeSingleCandidateGroups = (config) => {
+  const groups = getProxyGroups(config).map((group) => {
+    const proxyNames = getGroupProxyNames(group);
+    if (
+      String(group.type || "").toLowerCase() !== "select" ||
+      proxyNames.length !== 1 ||
+      hasDynamicGroupSource(group)
+    ) {
+      return group;
+    }
+
+    return {
+      ...group,
+      type: "fallback",
+      proxies: proxyNames,
+      url:
+        typeof group.url === "string" && group.url.trim()
+          ? group.url
+          : SETTINGS.SINGLE_TARGET_TEST_URL,
+      interval:
+        Number.isFinite(group.interval) && group.interval > 0
+          ? group.interval
+          : SETTINGS.SINGLE_TARGET_INTERVAL,
+      lazy: typeof group.lazy === "boolean" ? group.lazy : true
+    };
+  });
+
+  config["proxy-groups"] = groups;
+};
 
 const findAvailableGroupName = (config, baseName = "PROXY", additionalReservedNames = []) => {
   const reservedNames = new Set([
@@ -172,15 +272,17 @@ const findAvailableGroupName = (config, baseName = "PROXY", additionalReservedNa
   return `${fallbackName}-${index}`;
 };
 
-// 保留订阅原生策略组和 Mihomo 内置 GLOBAL；只有缺少可用 PROXY 时才补建一层。
+// 保留订阅节点的原始顺序，不根据节点名称、地区或协议猜测优先级。
 const ensureProxyTarget = (config) => {
   const groups = getProxyGroups(config);
   const existingProxyGroup = groups.find((group) => group.name === "PROXY");
-  if (existingProxyGroup) return "PROXY";
+  if (existingProxyGroup && hasUsableGroupSource(existingProxyGroup)) return "PROXY";
 
   const proxyNames = getProxyNames(config);
   const providerNames = Object.keys(getProxyProviders(config));
-  const fallbackGroup = groups.find((group) => group.name !== "GLOBAL");
+  const fallbackGroup = groups.find(
+    (group) => group.name !== "GLOBAL" && group.name !== "PROXY" && hasUsableGroupSource(group)
+  );
 
   if (!proxyNames.length && !providerNames.length && !fallbackGroup) return null;
 
@@ -189,17 +291,13 @@ const ensureProxyTarget = (config) => {
       ? fallbackGroup.proxies
       : [];
   const groupName = findAvailableGroupName(config, "PROXY", fallbackReferences);
-  const preferred = pickPreferredProxy(proxyNames);
-  const orderedProxyNames = preferred
-    ? [preferred, ...proxyNames.filter((name) => name !== preferred)]
-    : [];
   const group = {
     name: groupName,
     type: "select"
   };
 
-  if (orderedProxyNames.length) {
-    group.proxies = orderedProxyNames;
+  if (proxyNames.length) {
+    group.proxies = proxyNames;
   } else if (fallbackGroup) {
     group.proxies = [fallbackGroup.name];
   }
@@ -208,8 +306,46 @@ const ensureProxyTarget = (config) => {
     group.use = providerNames;
   }
 
-  config["proxy-groups"] = [group, ...groups];
+  config["proxy-groups"] = [
+    group,
+    ...groups.filter((existingGroup) => existingGroup.name !== "PROXY")
+  ];
   return groupName;
+};
+
+// 显式 GLOBAL 只跟随实际代理出口，避免内置 GLOBAL 和旧选择状态显示为空。
+const ensureGlobalTarget = (config, proxyTarget) => {
+  const groups = getProxyGroups(config);
+  const existingGlobal = groups.find((group) => group.name === "GLOBAL");
+  const preservedGlobal = existingGlobal
+    ? omitKeys(existingGlobal, [
+        "type",
+        "proxies",
+        "use",
+        "filter",
+        "exclude-filter",
+        "exclude-type",
+        "include-all",
+        "include-all-proxies",
+        "include-all-providers",
+        "strategy"
+      ])
+    : {};
+  const globalGroup = {
+    ...preservedGlobal,
+    name: "GLOBAL",
+    type: "select",
+    proxies: [proxyTarget]
+  };
+  const groupsWithoutGlobal = groups.filter((group) => group.name !== "GLOBAL");
+  const proxyIndex = groupsWithoutGlobal.findIndex((group) => group.name === proxyTarget);
+  const insertIndex = proxyIndex >= 0 ? proxyIndex + 1 : 0;
+
+  config["proxy-groups"] = [
+    ...groupsWithoutGlobal.slice(0, insertIndex),
+    globalGroup,
+    ...groupsWithoutGlobal.slice(insertIndex)
+  ];
 };
 
 const applyGeoData = (config) => {
@@ -460,10 +596,14 @@ const applyRules = (config, proxyTarget, directDomains, proxyDomains) => {
 
 function main(input) {
   const config = isPlainObject(input) ? input : {};
+  removeRedundantGroups(config);
   const proxyTarget = ensureProxyTarget(config);
 
   // 没有节点、Provider 或可复用策略组时，无法构造合法的代理规则，保持原配置不动。
   if (!proxyTarget) return config;
+
+  ensureGlobalTarget(config, proxyTarget);
+  normalizeSingleCandidateGroups(config);
 
   const directDomains = normalizeDomains(USER_DIRECT_DOMAINS);
   const proxyDomains = normalizeDomains([
