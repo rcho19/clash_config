@@ -13,8 +13,7 @@
    - 严格路由：开启
    - ICMP 转发：关闭
 3. 覆写：内置-不覆写（避免内置 DNS 覆盖 YAML）。
-4. 附加 HTTP 代理到 VPN：关闭。
-5. Windows 上以管理员身份运行 Clash Mi。
+4. Windows 上以管理员身份运行 Clash Mi。
 
 > Mihomo 官方目前建议无特殊问题时使用 mixed；它由 system 处理 TCP、gVisor 处理 UDP。
 >
