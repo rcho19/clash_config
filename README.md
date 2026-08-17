@@ -12,11 +12,11 @@ https://cdn.jsdelivr.net/gh/rcho19/clash_config@main/override/flclash-override.j
 https://cdn.jsdelivr.net/gh/rcho19/clash_config@main/override/clashmi-override.yaml
 ```
 
-**如果遇到`cdn`缓存，可使用下面地址清除缓存后再次拉取**
+**如果遇到`cdn`缓存，可到 [Purge jsDelivr CDN Cache](https://www.jsdelivr.com/tools/purge) 中输入地址清除缓存后再尝试**
 
-```text
+<!-- ```text
 https://purge.jsdelivr.net/gh/用户名/仓库名@main/配置文件.yaml
-```
+``` -->
 
 **备选：**
 
