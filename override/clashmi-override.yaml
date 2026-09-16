@@ -1,9 +1,10 @@
-# Clash Mi / Mihomo 自定义覆写片段
+# Clash Mi / Mihomo 单节点自定义覆写片段
 #
 # 职责边界：
 # - Clash Mi 内置覆写负责 TUN（启用、协议栈、DNS 劫持、严格路由等平台参数）。
-# - 本文件只负责 DNS、嗅探与分流，不包含节点凭据，也不声明 tun。
-# - 保留订阅原生 PROXY 组和 Mihomo 自动生成的 GLOBAL 组，避免覆盖已选中的 LAX。
+# - 本文件负责单节点出口组、DNS、嗅探与分流，不包含节点凭据，也不声明 tun。
+# - 适用范围：3x-ui 输出的单节点 Clash YAML；不用于带有复杂原生策略组的多节点/Provider 订阅。
+# - 必须将 Clash Mi 的“内置覆写”设为“内置-不覆写”；后置内置覆写会覆盖本文件的 DNS 设置。
 
 mode: rule
 allow-lan: false
@@ -44,6 +45,19 @@ sniffer:
         - 443
         - 8443
 
+# 单节点订阅通常只有 proxies，没有 PROXY/GLOBAL 策略组；这里用动态收录节点补齐。
+# 不设置健康检查，避免单节点因探测 URL 不可达而被错误判定为不可用。
+proxy-groups:
+  - name: PROXY
+    type: select
+    include-all-proxies: true
+
+  # 规则模式与全局模式共用同一个美西节点出口。
+  - name: GLOBAL
+    type: select
+    proxies:
+      - PROXY
+
 dns:
   enable: true
   ipv6: false
@@ -52,6 +66,8 @@ dns:
   use-hosts: true
   use-system-hosts: false
   respect-rules: true
+  # 只监听本机，避免订阅携带 0.0.0.0:1053 时暴露 DNS 服务到局域网。
+  listen: 127.0.0.1:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter-mode: blacklist
@@ -105,7 +121,8 @@ dns:
     "geosite:telegram": *foreign_dns
     "geosite:gfw": *foreign_dns
 
-    # 只有明确需要直连的域名才使用国内 DoH；其他域名默认通过 PROXY 解析。
+    # AI/境外域名默认通过 PROXY 解析；CN、私网、连通性和 NTP 是为可用性保留的直连 DNS 例外。
+    # 因此这是“重点域名防泄漏”，不是所有公共域名都不经过本地网络的零直连模式。
     "+.cn": *direct_dns
     "geosite:private": *direct_dns
     "geosite:cn": *direct_dns

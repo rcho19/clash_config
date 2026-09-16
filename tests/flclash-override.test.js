@@ -33,11 +33,8 @@ const applyOverride = createRunner();
 
 const assertSingleTargetGroup = (group, name, proxyName) => {
   assert.equal(group.name, name);
-  assert.equal(group.type, "fallback");
+  assert.equal(group.type, "select");
   assert.deepEqual(group.proxies, [proxyName]);
-  assert.equal(group.url, "https://www.gstatic.com/generate_204");
-  assert.equal(group.interval, 300);
-  assert.equal(group.lazy, true);
 };
 
 test("多节点按订阅原始顺序构造 PROXY，不再按名称猜测优先级", () => {
@@ -67,6 +64,20 @@ test("多节点按订阅原始顺序构造 PROXY，不再按名称猜测优先�
     "https://8.8.8.8/dns-query#PROXY"
   ]);
   assert.equal(result.dns["fake-ip-filter"].includes("+.cn"), false);
+  assert.equal(result.rules.at(-1), "MATCH,PROXY");
+});
+
+test("3x-ui 单节点无策略组时构造本地 DNS 安全出口", () => {
+  const result = applyOverride({
+    proxies: [{ name: "US-West-VLESS", type: "vless", tls: true }]
+  });
+
+  assert.deepEqual(result["proxy-groups"].slice(0, 2), [
+    { name: "PROXY", type: "select", proxies: ["US-West-VLESS"] },
+    { name: "GLOBAL", type: "select", proxies: ["PROXY"] }
+  ]);
+  assert.equal(result.dns.listen, "127.0.0.1:1053");
+  assert.equal(result.dns.nameserver.every((server) => server.includes("#PROXY")), true);
   assert.equal(result.rules.at(-1), "MATCH,PROXY");
 });
 
@@ -156,7 +167,7 @@ test("PROXY 名称冲突时生成独立组名并同步 DNS 与规则", () => {
   });
 
   assert.equal(result["proxy-groups"][0].name, "FLCLASH-PROXY");
-  assert.equal(result["proxy-groups"][0].type, "fallback");
+  assert.equal(result["proxy-groups"][0].type, "select");
   assert.deepEqual(result["proxy-groups"][0].proxies, ["PROXY"]);
   assertSingleTargetGroup(result["proxy-groups"][1], "GLOBAL", "FLCLASH-PROXY");
   assert.equal(result.dns.nameserver[0], "https://1.1.1.1/dns-query#FLCLASH-PROXY");
@@ -168,7 +179,7 @@ test("无可用代理出口时保持原配置不动", () => {
   assert.deepEqual(applyOverride(undefined), {});
 });
 
-test("DNS 配置移除 fallback/旧 rules，保留安全的用户项", () => {
+test("DNS 配置移除旧上游、清理 system:// 并收紧监听", () => {
   const result = applyOverride({
     proxies: [{ name: "LAX", type: "vless" }],
     dns: {
@@ -179,12 +190,13 @@ test("DNS 配置移除 fallback/旧 rules，保留安全的用户项", () => {
       "fake-ip-filter": ["+.custom.example", "+.stun.example"],
       "nameserver-policy": {
         "+.custom.example": ["https://custom.example/dns-query#DIRECT"],
-        "+.google.com": ["system://"]
+        "+.google.com": ["system://"],
+        "+.legacy.example": ["system://"]
       }
     }
   });
 
-  assert.equal(result.dns.listen, "0.0.0.0:1053");
+  assert.equal(result.dns.listen, "127.0.0.1:1053");
   assert.equal("fallback" in result.dns, false);
   assert.equal("fallback-filter" in result.dns, false);
   assert.equal("rules" in result.dns, false);
@@ -195,6 +207,7 @@ test("DNS 配置移除 fallback/旧 rules，保留安全的用户项", () => {
     "https://custom.example/dns-query#DIRECT"
   ]);
   assert.deepEqual(result.dns["nameserver-policy"]["+.google.com"], result.dns.nameserver);
+  assert.deepEqual(result.dns["nameserver-policy"]["+.legacy.example"], result.dns.nameserver);
 });
 
 test("节点级 TLS 指纹保留显式值并清理已移除的全局字段", () => {
@@ -215,6 +228,16 @@ test("节点级 TLS 指纹保留显式值并清理已移除的全局字段", () 
   assert.equal(result.proxies[3]["client-fingerprint"], undefined);
 });
 
+test("Provider 配置保留全局指纹兼容兜底", () => {
+  const result = applyOverride({
+    "proxy-providers": {
+      primary: { type: "http", url: "https://example.com/sub" }
+    }
+  });
+
+  assert.equal(result["global-client-fingerprint"], "chrome");
+});
+
 test("规则覆盖 Google/Microsoft/连通性且不使用宽泛 STUN 关键词", () => {
   const result = applyOverride({
     proxies: [{ name: "LAX", type: "vless" }],
@@ -229,6 +252,43 @@ test("规则覆盖 Google/Microsoft/连通性且不使用宽泛 STUN 关键词",
   assert.equal(result.rules.some((rule) => /^DOMAIN-KEYWORD,(?:stun|turn),/i.test(rule)), false);
   assert.equal(result.rules.includes("AND,((NETWORK,UDP),(DST-PORT,3478)),REJECT"), true);
   assert.equal(new Set(result.rules).size, result.rules.length);
+});
+
+test("保留订阅非 MATCH 规则，并将已移除组的规则改投实际出口", () => {
+  const result = applyOverride({
+    proxies: [{ name: "LAX", type: "vless" }],
+    "proxy-groups": [{ name: "AI", type: "select", proxies: ["LAX"] }],
+    rules: [
+      "RULE-SET,ads,REJECT",
+      "PROCESS-NAME,private-app,DIRECT",
+      "DOMAIN-SUFFIX,legacy-ai.example,AI",
+      "NETWORK,UDP,DIRECT",
+      "DOMAIN-SUFFIX,stun.example,DIRECT",
+      "DOMAIN-SUFFIX,normal.example,DIRECT",
+      "MATCH,DIRECT"
+    ]
+  });
+
+  assert.equal(result.rules.includes("RULE-SET,ads,REJECT"), true);
+  assert.equal(result.rules.includes("PROCESS-NAME,private-app,DIRECT"), true);
+  assert.equal(result.rules.includes("DOMAIN-SUFFIX,legacy-ai.example,PROXY"), true);
+  assert.equal(result.rules.includes("NETWORK,UDP,DIRECT"), false);
+  assert.equal(result.rules.includes("DOMAIN-SUFFIX,stun.example,DIRECT"), false);
+  assert.equal(result.rules.includes("DOMAIN-SUFFIX,normal.example,DIRECT"), true);
+  assert.equal(result.rules.some((rule) => /^MATCH\s*,DIRECT$/i.test(rule)), false);
+  assert.equal(result.rules.at(-1), "MATCH,PROXY");
+});
+
+test("内置 AI 代理规则优先于订阅中的同域名直连规则", () => {
+  const result = applyOverride({
+    proxies: [{ name: "LAX", type: "vless" }],
+    rules: ["DOMAIN-SUFFIX,google.com,DIRECT", "MATCH,DIRECT"]
+  });
+
+  const proxyIndex = result.rules.indexOf("DOMAIN-SUFFIX,google.com,PROXY");
+  const directIndex = result.rules.indexOf("DOMAIN-SUFFIX,google.com,DIRECT");
+  assert.ok(proxyIndex > -1);
+  assert.ok(directIndex > proxyIndex);
 });
 
 test("自定义直连子域优先于预置代理父域", () => {

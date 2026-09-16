@@ -8,8 +8,8 @@ const USER_DIRECT_DOMAINS = [];
 const USER_PROXY_DOMAINS = [];
 
 const SETTINGS = {
-  SINGLE_TARGET_TEST_URL: "https://www.gstatic.com/generate_204",
-  SINGLE_TARGET_INTERVAL: 300,
+  // 仅监听本机，避免订阅携带 0.0.0.0:1053 时把 DNS 服务暴露到局域网。
+  DNS_LISTEN: "127.0.0.1:1053",
   STRICT_BLOCK_QUIC: false,
   STRICT_BLOCK_STUN: true
 };
@@ -220,38 +220,55 @@ const removeRedundantGroups = (config) => {
   if (hadProxyGroups || removedNames.size > 0) {
     config["proxy-groups"] = groups;
   }
+
+  return removedNames;
 };
 
-// FlClash 会回放旧 selectedMap。单候选 select 改为自动计算型 fallback 后，
-// 不再受失效旧选择影响，界面与内核都会直接使用唯一候选。
-const normalizeSingleCandidateGroups = (config) => {
-  const groups = getProxyGroups(config).map((group) => {
-    const proxyNames = getGroupProxyNames(group);
-    if (
-      String(group.type || "").toLowerCase() !== "select" ||
-      proxyNames.length !== 1 ||
-      hasDynamicGroupSource(group)
-    ) {
-      return group;
-    }
+const getRuleTargetIndex = (parts) => {
+  if (!parts.length) return -1;
+  const lastIndex = parts.length - 1;
+  return String(parts[lastIndex]).trim().toLowerCase() === "no-resolve"
+    ? lastIndex - 1
+    : lastIndex;
+};
 
-    return {
-      ...group,
-      type: "fallback",
-      proxies: proxyNames,
-      url:
-        typeof group.url === "string" && group.url.trim()
-          ? group.url
-          : SETTINGS.SINGLE_TARGET_TEST_URL,
-      interval:
-        Number.isFinite(group.interval) && group.interval > 0
-          ? group.interval
-          : SETTINGS.SINGLE_TARGET_INTERVAL,
-      lazy: typeof group.lazy === "boolean" ? group.lazy : true
-    };
-  });
+const isUnsafeDirectWebRtcRule = (rule) => {
+  const normalized = String(rule || "").replace(/\s+/g, "");
+  if (!/,DIRECT(?:,|$)/i.test(normalized)) return false;
 
-  config["proxy-groups"] = groups;
+  return (
+    /NETWORK,UDP/i.test(normalized) ||
+    /DST-PORT,(?:3478|5349|19302)(?:,|$)/i.test(normalized) ||
+    /(?:^|[,./_-])(?:STUN|TURN)(?:[,./_-]|$)/i.test(normalized)
+  );
+};
+
+// 保留订阅的安全非 MATCH 规则；旧版只保留 DIRECT，会静默丢弃 RULE-SET、REJECT、
+// PROCESS-NAME 等订阅规则。已删除的 AI/MEDIA 组规则改投到实际代理出口，
+// 订阅中可能绕过 TUN 的 UDP/STUN 直连规则则不继承。
+const getPreservedSubscriptionRules = (config, removedNames = new Set(), proxyTarget) => {
+  const removedGroupNames = new Set(
+    [...REDUNDANT_GROUP_NAMES, ...removedNames].map((name) => String(name).trim().toUpperCase())
+  );
+
+  return (Array.isArray(config.rules) ? config.rules : [])
+    .map((rule) => String(rule || "").trim())
+    .filter(
+      (rule) =>
+        rule &&
+        !rule.startsWith("#") &&
+        !/^MATCH\s*,/i.test(rule) &&
+        !isUnsafeDirectWebRtcRule(rule)
+    )
+    .map((rule) => {
+      const parts = rule.split(",");
+      const targetIndex = getRuleTargetIndex(parts);
+      if (targetIndex > 0 && removedGroupNames.has(String(parts[targetIndex]).trim().toUpperCase())) {
+        parts[targetIndex] = proxyTarget;
+        return parts.join(",");
+      }
+      return rule;
+    });
 };
 
 const findAvailableGroupName = (config, baseName = "PROXY", additionalReservedNames = []) => {
@@ -381,8 +398,19 @@ const applyProxyDefaults = (config) => {
     }
   });
 
-  // Mihomo v1.19.30 已移除全局 TLS 指纹，旧字段会产生配置错误。
-  delete config["global-client-fingerprint"];
+  // 全局字段已 deprecated，但 Provider 节点在脚本阶段尚未展开，无法逐个补字段。
+  // 单节点/内联节点使用节点级字段；未来使用 Provider 时保留兼容兜底，避免握手参数回退。
+  const hasProxyProviders = Object.keys(getProxyProviders(config)).length > 0;
+  if (hasProxyProviders) {
+    if (
+      typeof config["global-client-fingerprint"] !== "string" ||
+      !config["global-client-fingerprint"].trim()
+    ) {
+      config["global-client-fingerprint"] = "chrome";
+    }
+  } else {
+    delete config["global-client-fingerprint"];
+  }
 };
 
 const applySniffer = (config) => {
@@ -458,7 +486,19 @@ const applyDns = (config, proxyTarget, directDomains, proxyDomains) => {
   const existingFakeIpFilter = Array.isArray(existingDns["fake-ip-filter"])
     ? existingDns["fake-ip-filter"].filter((item) => !/^\+?\.?(?:stun|turn)/i.test(String(item)))
     : [];
-  const nameserverPolicy = { ...existingPolicy };
+  // 不继承 system://，避免订阅的未知策略把 DNS 查询送回系统解析器。
+  // 该策略若只剩 system://，改用经 PROXY 的境外 DoH；明确的 DIRECT DoH 仍保留。
+  const nameserverPolicy = {};
+  Object.entries(existingPolicy).forEach(([key, value]) => {
+    const values = Array.isArray(value) ? value : [value];
+    const sanitizedValues = values.filter((item) => String(item || "").trim() !== "system://");
+    const sanitizedValue = sanitizedValues.length
+      ? Array.isArray(value)
+        ? sanitizedValues
+        : sanitizedValues[0]
+      : foreignDns;
+    nameserverPolicy[key] = sanitizedValue;
+  });
 
   connectivityDomains.forEach((domain) => {
     nameserverPolicy[`+.${domain}`] = chinaDns;
@@ -486,7 +526,8 @@ const applyDns = (config, proxyTarget, directDomains, proxyDomains) => {
     "direct-nameserver",
     "direct-nameserver-follow-policy",
     "fake-ip-filter",
-    "rules"
+    "rules",
+    "listen"
   ]);
 
   config.dns = {
@@ -498,6 +539,7 @@ const applyDns = (config, proxyTarget, directDomains, proxyDomains) => {
     "use-hosts": true,
     "use-system-hosts": false,
     "respect-rules": true,
+    listen: SETTINGS.DNS_LISTEN,
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
     "fake-ip-filter-mode": "blacklist",
@@ -537,12 +579,6 @@ const applyDns = (config, proxyTarget, directDomains, proxyDomains) => {
   };
 };
 
-const getPreservedDirectRules = (config) =>
-  (Array.isArray(config.rules) ? config.rules : []).filter((rule) => {
-    const value = String(rule || "").trim();
-    return value && !value.startsWith("#") && !/^MATCH,/i.test(value) && /,DIRECT(?:,|$)/i.test(value);
-  });
-
 const buildNetworkBlockRules = () => [
   ...(SETTINGS.STRICT_BLOCK_QUIC
     ? ["AND,((NETWORK,UDP),(DST-PORT,443)),REJECT"]
@@ -556,8 +592,18 @@ const buildNetworkBlockRules = () => [
     : [])
 ];
 
-const applyRules = (config, proxyTarget, directDomains, proxyDomains) => {
-  const preservedDirectRules = getPreservedDirectRules(config);
+const applyRules = (
+  config,
+  proxyTarget,
+  directDomains,
+  proxyDomains,
+  removedGroupNames = new Set()
+) => {
+  const preservedSubscriptionRules = getPreservedSubscriptionRules(
+    config,
+    removedGroupNames,
+    proxyTarget
+  );
 
   config.rules = unique([
     "GEOSITE,category-ads-all,REJECT",
@@ -585,25 +631,24 @@ const applyRules = (config, proxyTarget, directDomains, proxyDomains) => {
     `GEOSITE,microsoft,${proxyTarget}`,
     `GEOSITE,gfw,${proxyTarget}`,
 
-    ...preservedDirectRules,
     "GEOSITE,synology,DIRECT",
     "GEOSITE,category-game-platforms-download@cn,DIRECT",
     "GEOSITE,cn,DIRECT",
     "GEOIP,CN,DIRECT,no-resolve",
+    ...preservedSubscriptionRules,
     `MATCH,${proxyTarget}`
   ]);
 };
 
 function main(input) {
   const config = isPlainObject(input) ? input : {};
-  removeRedundantGroups(config);
+  const removedGroupNames = removeRedundantGroups(config);
   const proxyTarget = ensureProxyTarget(config);
 
   // 没有节点、Provider 或可复用策略组时，无法构造合法的代理规则，保持原配置不动。
   if (!proxyTarget) return config;
 
   ensureGlobalTarget(config, proxyTarget);
-  normalizeSingleCandidateGroups(config);
 
   const directDomains = normalizeDomains(USER_DIRECT_DOMAINS);
   const proxyDomains = normalizeDomains([
@@ -623,7 +668,7 @@ function main(input) {
   applySniffer(config);
   applyTun(config);
   applyDns(config, proxyTarget, directDomains, proxyDomains);
-  applyRules(config, proxyTarget, directDomains, proxyDomains);
+  applyRules(config, proxyTarget, directDomains, proxyDomains, removedGroupNames);
 
   return config;
 }

@@ -4,6 +4,8 @@
 
 **首选：**
 
+Clash Mi YAML：当前 3x-ui 单节点订阅专用；FlClash JS：动态兼容单节点、多节点和 Provider 订阅。
+
 ```text
 https://cdn.jsdelivr.net/gh/rcho19/clash_config@main/override/flclash-override.js
 ```
