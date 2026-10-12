@@ -1,7 +1,8 @@
 // FlClash 脚本覆写
 //
 // FlClash 会在本脚本执行后再次写入端口、运行模式、IPv6、TUN 基础参数、
-// GeoData URL 和 store-selected 等客户端设置，因此这里仅配置脚本真正能稳定控制的内容。
+// GeoData URL、自动更新开关/间隔和 store-selected 等客户端设置。
+// 本脚本面向 FlClash v0.8.99；Geo 自动更新请在“资源 → Geo 选项”中设置。
 
 // 自定义域名只填写纯域名，不要包含协议、路径或通配符。
 const USER_DIRECT_DOMAINS = [];
@@ -367,9 +368,8 @@ const ensureGlobalTarget = (config, proxyTarget) => {
 
 const applyGeoData = (config) => {
   config["geodata-mode"] = true;
-  config["geo-auto-update"] = true;
-  config["geo-update-interval"] = 24;
-  // FlClash 会在脚本执行后用“基础配置”中的地址覆盖 geox-url，因此这里不写入。
+  // geox-url、geo-auto-update 和 geo-update-interval 最终由 FlClash 客户端设置决定。
+  // 不在脚本中设置更新开关/间隔，避免误以为它们可以覆盖资源页中的设置。
 };
 
 const applyProfile = (config) => {
@@ -398,19 +398,23 @@ const applyProxyDefaults = (config) => {
     }
   });
 
-  // 全局字段已 deprecated，但 Provider 节点在脚本阶段尚未展开，无法逐个补字段。
-  // 单节点/内联节点使用节点级字段；未来使用 Provider 时保留兼容兜底，避免握手参数回退。
-  const hasProxyProviders = Object.keys(getProxyProviders(config)).length > 0;
-  if (hasProxyProviders) {
-    if (
-      typeof config["global-client-fingerprint"] !== "string" ||
-      !config["global-client-fingerprint"].trim()
-    ) {
-      config["global-client-fingerprint"] = "chrome";
-    }
-  } else {
-    delete config["global-client-fingerprint"];
-  }
+  // v0.8.99 对应内核已移除全局指纹字段，Provider 需在节点展开时补节点级字段。
+  // 条件赋值只处理未声明指纹的 TLS 节点；先执行订阅原有表达式，再补默认值。
+  // 3x-ui 内联节点不会进入 Provider 分支，其 REALITY/flow 等协议参数保持原值。
+  delete config["global-client-fingerprint"];
+  const fingerprintDefault =
+    '(select(has("client-fingerprint") == false and (.type == "trojan" or .type == "anytls" or ((.type == "vmess" or .type == "vless") and (.tls == true or (.["reality-opts"] | type) == "!!map")))) | .["client-fingerprint"]) = "chrome"';
+  Object.values(getProxyProviders(config)).forEach((provider) => {
+    if (!isPlainObject(provider)) return;
+    const override = isPlainObject(provider.override) ? provider.override : {};
+    const expressions = Array.isArray(override["override-expr"]) ? override["override-expr"] : [];
+    provider.override = {
+      ...override,
+      "override-expr": expressions.includes(fingerprintDefault)
+        ? expressions
+        : [...expressions, fingerprintDefault]
+    };
+  });
 };
 
 const applySniffer = (config) => {

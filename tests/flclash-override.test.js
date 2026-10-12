@@ -228,14 +228,74 @@ test("节点级 TLS 指纹保留显式值并清理已移除的全局字段", () 
   assert.equal(result.proxies[3]["client-fingerprint"], undefined);
 });
 
-test("Provider 配置保留全局指纹兼容兜底", () => {
+test("Provider 展开时补节点指纹，保留既有覆写及执行顺序", () => {
+  const existingExpressions = ['.["client-fingerprint"] = "firefox"', '.name += "x"', '.name += "x"'];
   const result = applyOverride({
+    "global-client-fingerprint": "chrome",
     "proxy-providers": {
-      primary: { type: "http", url: "https://example.com/sub" }
+      primary: {
+        type: "http",
+        url: "https://example.com/sub",
+        override: { udp: true, "additional-prefix": "test-", "override-expr": existingExpressions }
+      },
+      backup: { type: "file", path: "./backup.yaml" }
     }
   });
 
-  assert.equal(result["global-client-fingerprint"], "chrome");
+  assert.equal("global-client-fingerprint" in result, false);
+  const primary = result["proxy-providers"].primary;
+  assert.equal(primary.url, "https://example.com/sub");
+  assert.equal(primary.override.udp, true);
+  assert.equal(primary.override["additional-prefix"], "test-");
+  assert.deepEqual(primary.override["override-expr"].slice(0, 3), existingExpressions);
+  const defaults = result["proxy-providers"].backup.override["override-expr"];
+  assert.equal(defaults.length, 1);
+  assert.deepEqual(primary.override["override-expr"].slice(3), defaults);
+  assert.deepEqual(applyOverride(result), result);
+});
+
+test("3x-ui VLESS REALITY 节点只补缺失指纹，完整保留连接参数", () => {
+  const realityNode = {
+    name: "fixture-vless-reality",
+    type: "vless",
+    tls: true,
+    flow: "xtls-rprx-vision",
+    servername: "example.com",
+    udp: true,
+    "reality-opts": {
+      "public-key": "fixture-public-key",
+      "short-id": "fixture-short-id",
+      "support-x25519mlkem768": true
+    }
+  };
+  const explicitNode = { ...realityNode, name: "fixture-explicit", "client-fingerprint": "firefox" };
+  const result = applyOverride({ proxies: [realityNode, explicitNode] });
+
+  assert.deepEqual(result.proxies, [
+    { ...realityNode, "client-fingerprint": "chrome" },
+    explicitNode
+  ]);
+  assert.equal("proxy-providers" in result, false);
+  assert.equal("global-client-fingerprint" in result, false);
+});
+
+test("Geo 使用 dat，更新开关和间隔交给客户端且保留订阅原值", () => {
+  const config = { proxies: [{ name: "fixture", type: "vless", tls: true }] };
+  const result = applyOverride(config);
+  assert.equal(result["geodata-mode"], true);
+  assert.equal("geo-auto-update" in result, false);
+  assert.equal("geo-update-interval" in result, false);
+  assert.equal("geox-url" in result, false);
+
+  const inherited = applyOverride({
+    ...config,
+    "geo-auto-update": false,
+    "geo-update-interval": 72,
+    "geox-url": { geoip: "https://example.com/geoip.dat" }
+  });
+  assert.equal(inherited["geo-auto-update"], false);
+  assert.equal(inherited["geo-update-interval"], 72);
+  assert.deepEqual(inherited["geox-url"], { geoip: "https://example.com/geoip.dat" });
 });
 
 test("规则覆盖 Google/Microsoft/连通性且不使用宽泛 STUN 关键词", () => {
